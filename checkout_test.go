@@ -27,6 +27,27 @@ func TestCheckoutURLs(t *testing.T) {
 		t.Fatalf("unexpected embedded URL: %s", embedded)
 	}
 
+	donation, err := BuildHostedDonationURL("spring campaign", CheckoutURLOptions{
+		BaseURL: "https://pay.example/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if donation != "https://pay.example/donations/spring%20campaign" {
+		t.Fatalf("unexpected donation URL: %s", donation)
+	}
+
+	embeddedDonation, err := BuildEmbeddedDonationURL("spring", CheckoutURLOptions{
+		BaseURL:      "https://pay.example/",
+		ParentOrigin: "https://merchant.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embeddedDonation != "https://pay.example/embed/donations/spring?parentOrigin=https%3A%2F%2Fmerchant.example" {
+		t.Fatalf("unexpected embedded donation URL: %s", embeddedDonation)
+	}
+
 	if got := BuildModalScriptURL(CheckoutURLOptions{BaseURL: "https://pay.example/"}); got != "https://pay.example/modal/makepay.js" {
 		t.Fatalf("unexpected modal script URL: %s", got)
 	}

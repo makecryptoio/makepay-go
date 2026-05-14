@@ -27,9 +27,24 @@ func (c *Client) HostedCheckoutURL(paymentUID string) (string, error) {
 	})
 }
 
+// HostedDonationURL returns a full-page hosted donation URL for a donation slug.
+func (c *Client) HostedDonationURL(donationSlug string) (string, error) {
+	return BuildHostedDonationURL(donationSlug, CheckoutURLOptions{
+		BaseURL: c.checkoutBaseURL,
+	})
+}
+
 // EmbeddedCheckoutURL returns an iframe checkout URL for a payment UID.
 func (c *Client) EmbeddedCheckoutURL(paymentUID string, parentOrigin string) (string, error) {
 	return BuildEmbeddedCheckoutURL(paymentUID, CheckoutURLOptions{
+		BaseURL:      c.checkoutBaseURL,
+		ParentOrigin: parentOrigin,
+	})
+}
+
+// EmbeddedDonationURL returns an iframe donation URL for a donation slug.
+func (c *Client) EmbeddedDonationURL(donationSlug string, parentOrigin string) (string, error) {
+	return BuildEmbeddedDonationURL(donationSlug, CheckoutURLOptions{
 		BaseURL:      c.checkoutBaseURL,
 		ParentOrigin: parentOrigin,
 	})
@@ -64,6 +79,15 @@ func BuildHostedCheckoutURL(paymentUID string, options CheckoutURLOptions) (stri
 	return buildURL(firstNonEmpty(options.BaseURL, DefaultCheckoutBaseURL), "/payment/"+url.PathEscape(paymentUID), nil)
 }
 
+// BuildHostedDonationURL returns a full-page hosted donation URL for a donation slug.
+func BuildHostedDonationURL(donationSlug string, options CheckoutURLOptions) (string, error) {
+	if err := assertNonEmpty(donationSlug, "Donation slug is required."); err != nil {
+		return "", err
+	}
+
+	return buildURL(firstNonEmpty(options.BaseURL, DefaultCheckoutBaseURL), "/donations/"+url.PathEscape(donationSlug), nil)
+}
+
 // BuildEmbeddedCheckoutURL returns an iframe checkout URL for a payment UID.
 func BuildEmbeddedCheckoutURL(paymentUID string, options CheckoutURLOptions) (string, error) {
 	if err := assertNonEmpty(paymentUID, "Payment link UID is required."); err != nil {
@@ -76,6 +100,20 @@ func BuildEmbeddedCheckoutURL(paymentUID string, options CheckoutURLOptions) (st
 	}
 
 	return buildURL(firstNonEmpty(options.BaseURL, DefaultCheckoutBaseURL), "/embed/payment/"+url.PathEscape(paymentUID), query)
+}
+
+// BuildEmbeddedDonationURL returns an iframe donation URL for a donation slug.
+func BuildEmbeddedDonationURL(donationSlug string, options CheckoutURLOptions) (string, error) {
+	if err := assertNonEmpty(donationSlug, "Donation slug is required."); err != nil {
+		return "", err
+	}
+
+	query := url.Values{}
+	if strings.TrimSpace(options.ParentOrigin) != "" {
+		query.Set("parentOrigin", options.ParentOrigin)
+	}
+
+	return buildURL(firstNonEmpty(options.BaseURL, DefaultCheckoutBaseURL), "/embed/donations/"+url.PathEscape(donationSlug), query)
 }
 
 // BuildModalScriptURL returns the MakePay modal script URL.
@@ -131,7 +169,13 @@ func buildURL(baseURL string, path string, query url.Values) (string, error) {
 		return "", err
 	}
 
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + path
+	joinedPath := strings.TrimRight(parsed.Path, "/") + path
+	if unescapedPath, err := url.PathUnescape(joinedPath); err == nil && unescapedPath != joinedPath {
+		parsed.Path = unescapedPath
+		parsed.RawPath = joinedPath
+	} else {
+		parsed.Path = joinedPath
+	}
 	parsed.RawQuery = query.Encode()
 
 	return parsed.String(), nil

@@ -18,7 +18,7 @@ const (
 	// DefaultCheckoutBaseURL is the hosted MakePay checkout origin.
 	DefaultCheckoutBaseURL = "https://makepay.io"
 	// Version is the SDK version released through the public Go module.
-	Version = "0.1.0"
+	Version = "0.3.0"
 )
 
 // HTTPDoer is implemented by *http.Client and test clients.
@@ -57,6 +57,12 @@ type CreatePaymentLinkOptions struct {
 // RequestOptions controls low-level API request behavior.
 type RequestOptions struct {
 	Query map[string]any
+}
+
+// PublicRequestOptions controls unauthenticated public MakePay API requests.
+type PublicRequestOptions struct {
+	BaseURL    string
+	HTTPClient HTTPDoer
 }
 
 // Error is returned for invalid client configuration or non-2xx API responses.
@@ -197,6 +203,28 @@ func (c *Client) Request(
 	body any,
 	options RequestOptions,
 ) (map[string]any, error) {
+	var reader io.Reader
+	contentType := ""
+	if body != nil && method != http.MethodGet {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return nil, newClientError("Unable to encode MakePay request body as JSON.")
+		}
+		reader = bytes.NewReader(payload)
+		contentType = "application/json"
+	}
+
+	return c.requestWithReader(ctx, method, path, reader, contentType, options)
+}
+
+func (c *Client) requestWithReader(
+	ctx context.Context,
+	method string,
+	path string,
+	body io.Reader,
+	contentType string,
+	options RequestOptions,
+) (map[string]any, error) {
 	if c == nil {
 		return nil, newClientError("MakePay client is required.")
 	}
@@ -214,16 +242,7 @@ func (c *Client) Request(
 	}
 	requestURL.RawQuery = query.Encode()
 
-	var reader io.Reader
-	if body != nil && method != http.MethodGet {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return nil, newClientError("Unable to encode MakePay request body as JSON.")
-		}
-		reader = bytes.NewReader(payload)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, requestURL.String(), reader)
+	req, err := http.NewRequestWithContext(ctx, method, requestURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -232,8 +251,8 @@ func (c *Client) Request(
 	req.Header.Set("User-Agent", "MakePayGo/"+Version)
 	req.Header.Set("X-MakeCrypto-Key-Id", c.keyID)
 	req.Header.Set("X-MakeCrypto-Key-Secret", c.keySecret)
-	if reader != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if body != nil && contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	response, err := c.httpClient.Do(req)
@@ -258,6 +277,74 @@ func (c *Client) Request(
 	}
 
 	return decoded, nil
+}
+
+// CreateAnonymousPaymentLink creates a public MakePay payment link without API
+// credentials. Anonymous links must include an explicit settlement route.
+func CreateAnonymousPaymentLink(
+	ctx context.Context,
+	payload AnonymousPaymentLinkPayload,
+	options PublicRequestOptions,
+) (map[string]any, error) {
+	baseURL := normalizeBaseURL(firstNonEmpty(options.BaseURL, DefaultBaseURL))
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, newClientError("MakePay base URL is required.")
+	}
+
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	requestURL, err := url.Parse(baseURL + "/api/partner/v1/makepay/payment-links")
+	if err != nil {
+		return nil, err
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, newClientError("Unable to encode MakePay request body as JSON.")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), bytes.NewReader(encoded))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "MakePayGo/"+Version)
+
+	response, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	rawBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	decoded := decodeObject(rawBody)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, &Error{
+			StatusCode:   response.StatusCode,
+			ResponseBody: decoded,
+			Body:         rawBody,
+			Err:          errors.New(readErrorMessage(decoded, response.StatusCode)),
+		}
+	}
+
+	return decoded, nil
+}
+
+// CreateAnonymousMakePayPaymentLink is an alias for CreateAnonymousPaymentLink.
+func CreateAnonymousMakePayPaymentLink(
+	ctx context.Context,
+	payload AnonymousPaymentLinkPayload,
+	options PublicRequestOptions,
+) (map[string]any, error) {
+	return CreateAnonymousPaymentLink(ctx, payload, options)
 }
 
 func decodeObject(rawBody []byte) map[string]any {
