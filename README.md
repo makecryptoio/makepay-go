@@ -17,6 +17,8 @@ The package is published through the public Go module index:
 https://pkg.go.dev/github.com/makecryptoio/makepay-go
 ```
 
+Public source: `https://github.com/makecryptoio/makepay-go`
+
 The module targets Go 1.22 or newer and uses only the Go standard library.
 
 ## Configure
